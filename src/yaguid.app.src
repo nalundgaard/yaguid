@@ -1,0 +1,19 @@
+{application, yaguid, [
+    {description, "Yet Another Globally Unique ID server (snowflake-ish, in Erlang)"},
+    {vsn, "git"},
+    {registered, [yaguid_sup]},
+    {applications, [
+        kernel,
+        stdlib
+    ]},
+    {mod, {yaguid_app, []}},
+    {env, [
+        %% Node ID: 0-1023
+        {node_id, 0},
+        %% Local Partition Size: number of independent ID-issuing local servers
+        %%                       (power of 2)
+        {local_partition_size, 16}
+    ]},
+    {licenses, ["Apache 2.0"]},
+    {links, [{"Github", "https://github.com/nalundgaard/yaguid"}]}
+]}.
