@@ -97,6 +97,9 @@ partition_srv_name(PartitionId) ->
 %%==============================================================================
 
 init([NodeId, PartitionId, PartitionBits]) ->
+    timer:sleep(1), %% sleep for 1 ms to ensure that this process cannot reissue
+                    %% an ID from a previously crashed server with the same
+                    %% partition ID
     MaxSeq = ?SEQ_MASK bsr PartitionBits,
     {ok, #state{node_id = NodeId,
                 last_ts = yaguid:timestamp(),

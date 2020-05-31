@@ -38,7 +38,51 @@ The final bit in the ID is unused, as per the [snowflake][snowflake] format.
 
 ## Architecture
 
+`yaguid` is an Erlang/OTP application with a supervision tree that manages a set of 1-64 `worker`
+processes (instances of [`yaguid_srv`][yaguid_srv] `gen_server`). During application startup, the
+application computes a set of local `partition_id`s based on the [configured](#configure)
+`local_partition_size`. This `partition_id` is allocated out of the most significant bits of the
+`sequence` segment, and each [`yaguid_srv`][yaguid_srv] process is issued a unique one. The higher
+the `local_partition_size`, the smaller the effective range of `sequence` values for each individual
+[`yaguid_srv`][yaguid_srv] process.
 
+The [`yaguid_srv`][yaguid_srv] process keeps track of its last `timestamp`, its `node_id`, its 
+`partition_id`, the partition size (`partition_bits`), and the last `sequence` number issued.
+Whenever a `get_id` request is processed, the following steps occur:
+
+1. Get the current timestamp.
+  1. If is hasn't changed since the last issued ID and the last issued `sequence` number is greater
+     than or equal to the maximum value (the process is out of `sequence` numbers in this window),
+     sleep for 1 millisecond and retry step 1.
+  2. If it hasn't changed since the last issued ID, increment the last `sequence` number,
+     generate an ID based on it, and update the sequence number in the state.
+  3. If it has changed since the last issued ID, reset the last `sequence` number to 0,
+     generate an ID based on it, and update the last `timestamp` and sequence number in the state.
+2. Return the generated ID and update the server state.
+
+Because there may be many potential [`yaguid_srv`][yaguid_srv] processes that can issue IDs, the
+application balances among them by choosing one at random. This avoids any need for centralized
+tracking that would be required for round-robin, etc.
+
+Note that since the application uses a `one_for_all` supervision tree, any crash in any process will
+bring the application down. This is likely not strictly necessary, since the partitioning prevents
+ID collisions among each process. There is no need for the processes to persist or recover their
+state at any time, because they essentially reset every millisecond. In order to ensure that crash
+loops do not cause ID collisions, each [`yaguid_srv`][yaguid_srv] process sleeps for 1 millisecond
+on startup.
+
+### Limitations
+
+The `yaguid` ID uniqueness guarantee relies on the combined uniqueness of `node_id` and `timestamp`,
+and as such is predicated on:
+
+1. System time never going *backwards*. If the clock is adjusted such that the system time is a
+   value prior to the timestamp component of any previously issued ID, a collision may occur. Note
+   that the time between different nodes with different `node_id`s does not need to be in sync; it
+   just needs to be [monotonically increasing][monotonic] on each node. Of course, if a node will
+   reuse a retired node's `node_id`, its system time must preserve this monotonicity with respect to
+   the retired node's system time at its shutdown time. Well-configured ntp is advisable, naturally.
+2. Each used `node_id` being strictly and unique among the set of nodes actively issuing IDs.
 
 ## Build
 
@@ -102,7 +146,7 @@ $ make shell
 > yaguid_bench:bench().
 > Workers = 256, Iters = 4096, CheckDuplicates = true.
 > yaguid_bench:bench(Workers, Iters).
-yaguid_bench:bench(Workers, Iters, CheckDuplicates).
+> yaguid_bench:bench(Workers, Iters, CheckDuplicates).
 ```
 
 |        __parameter__ | __meaning__                                                       |
@@ -145,8 +189,9 @@ ok
 ok
 ```
 
-
 [snowflake]: https://github.com/twitter-archive/snowflake/blob/snowflake-2010/README.mkd
 [rebar3]: https://www.rebar3.org 
 [cfg]: config
 [shell_cfg_tmpl]: config/shell.config.tmpl
+[yaguid_srv]: src/yaguid_srv.erl
+[monotonic]: https://en.wikipedia.org/wiki/Monotonic_function
